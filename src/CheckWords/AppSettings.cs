@@ -1,3 +1,4 @@
+using CheckWords.Core;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.Win32;
@@ -16,8 +17,12 @@ internal sealed class AppSettings
     public bool Enabled { get; set; } = true;
     public bool Sound { get; set; } = true;
     public bool WarnMidWord { get; set; } = true;
-    public string ConvertWordHotkey { get; set; } = "Pause";
-    public string ConvertSelectionHotkey { get; set; } = "Shift+Pause";
+    /// <summary>Alt (left or right) + the backslash key above Enter.</summary>
+    public string ConvertWordHotkey { get; set; } = DefaultWordHotkey;
+    public string ConvertSelectionHotkey { get; set; } = DefaultSelectionHotkey;
+
+    public const string DefaultWordHotkey = "Alt+Oem5";
+    public const string DefaultSelectionHotkey = "Ctrl+Alt+Oem5";
     public int BeepFrequency { get; set; } = 1100;
     public int BeepDurationMs { get; set; } = 90;
 
@@ -94,9 +99,15 @@ internal static class Autostart
     }
 }
 
-/// <summary>A hotkey like "Pause", "Shift+Pause", "Ctrl+Alt+Space" (key names from System.Windows.Forms.Keys).</summary>
+/// <summary>
+/// A hotkey like "Alt+Oem5", "Shift+Pause", "Ctrl+Alt+Space": key names from System.Windows.Forms.Keys,
+/// or a single character as on the EN layout ("Alt+\", in JSON "Alt+\\").
+/// Right and left Alt/Ctrl/Shift are treated the same.
+/// </summary>
 internal sealed record Hotkey(int Vk, bool Ctrl, bool Shift, bool Alt, bool Win)
 {
+    static readonly IntPtr EnglishLayout = new(0x04090409);
+
     public static Hotkey? Parse(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
@@ -113,8 +124,17 @@ internal sealed record Hotkey(int Vk, bool Ctrl, bool Shift, bool Alt, bool Win)
                 default: return null;
             }
         }
-        if (!Enum.TryParse<Keys>(parts[^1], ignoreCase: true, out var key)) return null;
-        return new Hotkey((int)key & 0xFFFF, ctrl, shift, alt, win);
+        var last = parts[^1];
+        int vk;
+        if (last.Length == 1 && !char.IsLetterOrDigit(last[0]))
+        {
+            short r = Native.VkKeyScanExW(last[0], EnglishLayout);
+            if (r == -1) return null;
+            vk = r & 0xFF;
+        }
+        else if (Enum.TryParse<Keys>(last, ignoreCase: true, out var key)) vk = (int)key & 0xFFFF;
+        else return null;
+        return new Hotkey(vk, ctrl, shift, alt, win);
     }
 
     public bool Matches(int vk, Modifiers m) =>
@@ -127,7 +147,18 @@ internal sealed record Hotkey(int Vk, bool Ctrl, bool Shift, bool Alt, bool Win)
         if (Shift) parts.Add("Shift");
         if (Alt) parts.Add("Alt");
         if (Win) parts.Add("Win");
-        parts.Add(((Keys)Vk).ToString());
+        parts.Add(KeyName(Vk));
         return string.Join("+", parts);
+    }
+
+    /// <summary>"\" rather than "OemPipe" for punctuation keys.</summary>
+    static string KeyName(int vk)
+    {
+        if (vk is >= 0xBA and <= 0xE2)
+        {
+            uint ch = Native.MapVirtualKeyEx((uint)vk, 2 /* MAPVK_VK_TO_CHAR */, EnglishLayout) & 0xFFFF;
+            if (ch > 0x20) return ((char)ch).ToString();
+        }
+        return ((Keys)vk).ToString();
     }
 }

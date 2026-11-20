@@ -13,6 +13,7 @@ internal sealed class TrayApp : ApplicationContext
     readonly Icons _icons = new();
     readonly System.Windows.Forms.Timer _flashTimer = new() { Interval = 1500 };
     readonly HashSet<int> _swallowedKeys = new();
+    readonly ModifierTracker _modifiers = new();
     readonly Dictionary<uint, string> _processNames = new();
     readonly string _ownProcess = Process.GetCurrentProcess().ProcessName + ".exe";
 
@@ -76,8 +77,8 @@ internal sealed class TrayApp : ApplicationContext
 
         _beeper?.Dispose();
         _beeper = new Beeper(_settings.BeepFrequency, _settings.BeepDurationMs);
-        _wordHotkey = Hotkey.Parse(_settings.ConvertWordHotkey) ?? Hotkey.Parse("Pause");
-        _selectionHotkey = Hotkey.Parse(_settings.ConvertSelectionHotkey) ?? Hotkey.Parse("Shift+Pause");
+        _wordHotkey = Hotkey.Parse(_settings.ConvertWordHotkey) ?? Hotkey.Parse(AppSettings.DefaultWordHotkey);
+        _selectionHotkey = Hotkey.Parse(_settings.ConvertSelectionHotkey) ?? Hotkey.Parse(AppSettings.DefaultSelectionHotkey);
     }
 
     void BuildMenu()
@@ -146,8 +147,10 @@ internal sealed class TrayApp : ApplicationContext
 
     // ------------------------------------------------------------------ hook callbacks (keep fast)
 
-    bool OnHookKeyDown(int vk, int scan)
+    bool OnHookKeyDown(KeyInfo info)
     {
+        int vk = info.Vk;
+        _modifiers.OnKeyDown(info);
         if (vk == Vk.Capital)
         {
             if (!_capsDown) _capsOn = !_capsOn;
@@ -156,27 +159,30 @@ internal sealed class TrayApp : ApplicationContext
         }
         if (!_settings.Enabled) return false;
 
-        var mods = Modifiers.Current();
-        if (_wordHotkey?.Matches(vk, mods) == true)
+        var mods = _modifiers.Current();
+        Action? action = _wordHotkey?.Matches(vk, mods) == true ? ConvertWord
+            : _selectionHotkey?.Matches(vk, mods) == true ? ConvertSelection
+            : null;
+        if (action is not null)
         {
-            if (_swallowedKeys.Add(vk)) _ui.BeginInvoke(new Action(ConvertWord)); // ignore auto-repeat
-            return true;
-        }
-        if (_selectionHotkey?.Matches(vk, mods) == true)
-        {
-            if (_swallowedKeys.Add(vk)) _ui.BeginInvoke(new Action(ConvertSelection));
+            if (_swallowedKeys.Add(vk)) // first press, not auto-repeat
+            {
+                if (mods.Alt) InputSender.MaskAltRelease(); // must happen now, while Alt is still down
+                _ui.BeginInvoke(action);
+            }
             return true;
         }
 
-        var key = new KeyStroke(vk, scan, mods.Shift, _capsOn, mods.AltGr);
+        var key = new KeyStroke(vk, info.Scan, mods.Shift, _capsOn, mods.AltGr && !mods.Ctrl);
         _ui.BeginInvoke(new Action(() => ProcessKey(key, mods)));
         return false;
     }
 
-    bool OnHookKeyUp(int vk, int scan)
+    bool OnHookKeyUp(KeyInfo info)
     {
-        if (vk == Vk.Capital) _capsDown = false;
-        return _swallowedKeys.Remove(vk);
+        _modifiers.OnKeyUp(info);
+        if (info.Vk == Vk.Capital) _capsDown = false;
+        return _swallowedKeys.Remove(info.Vk);
     }
 
     // ------------------------------------------------------------------ typing
@@ -197,7 +203,8 @@ internal sealed class TrayApp : ApplicationContext
         if (_settings.IsExcluded(_lastProcess)) return;
 
         var lang = _layouts.LangOf(Native.GetKeyboardLayout(thread));
-        _session.OnKey(key, lang, mods.Ctrl, mods.Alt, mods.Win);
+        if (mods.IsShortcut && !Vk.IsModifier(key.Vk)) { _session.Reset(); return; }
+        _session.OnKey(key, lang);
     }
 
     void OnWarning(Suggestion s)
@@ -216,7 +223,7 @@ internal sealed class TrayApp : ApplicationContext
         _busy = true;
         try
         {
-            await InputSender.WaitForModifiersReleased();
+            if (!await InputSender.WaitForModifiersReleased()) return;
             var hwnd = Native.GetForegroundWindow();
             if (hwnd != _lastWindow) return;
             var plan = _session.PlanWordConversion();
@@ -240,7 +247,7 @@ internal sealed class TrayApp : ApplicationContext
         _busy = true;
         try
         {
-            await InputSender.WaitForModifiersReleased();
+            if (!await InputSender.WaitForModifiersReleased()) return;
             var hwnd = Native.GetForegroundWindow();
 
             string? backup = TryClipboard(() => Clipboard.ContainsText() ? Clipboard.GetText() : null);

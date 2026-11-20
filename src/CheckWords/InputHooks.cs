@@ -4,6 +4,9 @@ using CheckWords.Core;
 
 namespace CheckWords;
 
+/// <summary>One low-level keyboard event: virtual key, hardware scan code, LLKHF_* flags, timestamp (ms).</summary>
+internal readonly record struct KeyInfo(int Vk, int Scan, uint Flags, uint Time);
+
 /// <summary>
 /// Global low-level keyboard and mouse hooks. Callbacks run on the thread that installed the hooks
 /// (the UI thread) and must return quickly, so heavy work is posted back to the message loop.
@@ -29,9 +32,9 @@ internal sealed class InputHooks : IDisposable
     /// </summary>
     public static bool AcceptInjected { get; } = Environment.GetEnvironmentVariable("CHECKWORDS_ACCEPT_INJECTED") == "1";
 
-    /// <summary>(vk, scanCode) → true to swallow the key.</summary>
-    public Func<int, int, bool>? KeyDown { get; set; }
-    public Func<int, int, bool>? KeyUp { get; set; }
+    /// <summary>Return true to swallow the key.</summary>
+    public Func<KeyInfo, bool>? KeyDown { get; set; }
+    public Func<KeyInfo, bool>? KeyUp { get; set; }
     public Action? MouseDown { get; set; }
 
     public void Install()
@@ -55,9 +58,10 @@ internal sealed class InputHooks : IDisposable
                 if (!ours && (!injected || AcceptInjected))
                 {
                     int msg = (int)wParam;
+                    var key = new KeyInfo((int)data.vkCode, (int)data.scanCode, data.flags, data.time);
                     bool swallow = msg is Native.WM_KEYDOWN or Native.WM_SYSKEYDOWN
-                        ? KeyDown?.Invoke((int)data.vkCode, (int)data.scanCode) == true
-                        : msg is Native.WM_KEYUP or Native.WM_SYSKEYUP && KeyUp?.Invoke((int)data.vkCode, (int)data.scanCode) == true;
+                        ? KeyDown?.Invoke(key) == true
+                        : msg is Native.WM_KEYUP or Native.WM_SYSKEYUP && KeyUp?.Invoke(key) == true;
                     if (swallow) return 1;
                 }
             }
