@@ -43,6 +43,7 @@ internal sealed class TrayApp : ApplicationContext
         _settings = AppSettings.Load();
         LoadEngine();
         BuildMenu();
+        RemoveRedundantRunEntry();
 
         _tray.ContextMenuStrip = _menu;
         _tray.DoubleClick += (_, _) => ToggleEnabled();
@@ -99,7 +100,8 @@ internal sealed class TrayApp : ApplicationContext
         });
         _miIgnoreWord = new ToolStripMenuItem("", null, (_, _) => IgnoreLastWarning());
         _miExclude = new ToolStripMenuItem("", null, (_, _) => ToggleExcludeLastProcess());
-        _miAutostart = new ToolStripMenuItem("Запускать при входе в Windows", null, (_, _) => Autostart.Set(!Autostart.IsEnabled));
+        _miAutostart = new ToolStripMenuItem("Запускать при входе в Windows", null, (_, _) => ToggleAutostart());
+        _menu.ShowItemToolTips = true;
 
         _menu.Items.AddRange(new ToolStripItem[]
         {
@@ -133,7 +135,7 @@ internal sealed class TrayApp : ApplicationContext
         _miEnabled.Checked = _settings.Enabled;
         _miSound.Checked = _settings.Sound;
         _miMidWord.Checked = _settings.WarnMidWord;
-        _miAutostart.Checked = Autostart.IsEnabled;
+        RefreshAutostartItem();
 
         _miIgnoreWord.Visible = _lastWarning is not null;
         if (_lastWarning is not null)
@@ -336,6 +338,122 @@ internal sealed class TrayApp : ApplicationContext
     }
 
     void SetTooltip(string text) => _tray.Text = text.Length <= 127 ? text : text[..124] + "...";
+
+    // ------------------------------------------------------------------ autostart
+
+    static string ExePath => Environment.ProcessPath ?? Application.ExecutablePath;
+
+    /// <summary>
+    /// With an enabled scheduler task, a Run registry entry is harmful: it starts a non-elevated copy
+    /// first, and the elevated one from the task then exits (single instance).
+    /// </summary>
+    static void RemoveRedundantRunEntry()
+    {
+        if (Autostart.QueryTask() is { Enabled: true } && Autostart.RegistryEnabled)
+            Autostart.SetRegistry(false, ExePath);
+    }
+
+    void RefreshAutostartItem()
+    {
+        bool registry = Autostart.RegistryEnabled;
+        if (Autostart.QueryTask() is { } task)
+        {
+            var notes = new List<string> { task.Elevated ? "Планировщик, с правами администратора" : "Планировщик" };
+            if (!task.Enabled) notes.Add("задача отключена");
+            if (!Autostart.SamePath(task.Command, ExePath)) notes.Add("запускает другой exe");
+            if (registry) notes.Add("и ещё запись в реестре");
+            _miAutostart.Checked = task.Enabled;
+            _miAutostart.Text = $"Запускать при входе в Windows ({string.Join("; ", notes)})";
+            _miAutostart.ToolTipText = "Задача «CheckWords» в Планировщике заданий запускает:\n" + task.Command;
+        }
+        else
+        {
+            _miAutostart.Checked = registry;
+            _miAutostart.Text = registry
+                ? "Запускать при входе в Windows (без прав администратора)"
+                : "Запускать при входе в Windows";
+            _miAutostart.ToolTipText = registry ? @"Запись в реестре HKCU\Software\Microsoft\Windows\CurrentVersion\Run" : null;
+        }
+    }
+
+    async void ToggleAutostart()
+    {
+        if (_busy) return;
+        _busy = true;
+        try
+        {
+            bool elevated = Autostart.IsProcessElevated();
+            if (Autostart.QueryTask() is not null)
+            {
+                if (Ask("Отключить автозапуск?\n\nБудет удалена задача «CheckWords» из Планировщика заданий" +
+                        (elevated ? "." : ". Windows попросит подтверждение администратора."),
+                        MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+                if (await RunOnStaThread(() => Autostart.DeleteTask(asAdmin: !elevated)))
+                    Autostart.SetRegistry(false, ExePath);
+                else
+                    Ask("Не удалось удалить задачу: подтверждение администратора отклонено или произошла ошибка.", MessageBoxButtons.OK);
+            }
+            else if (Autostart.RegistryEnabled)
+            {
+                Autostart.SetRegistry(false, ExePath);
+            }
+            else
+            {
+                var answer = Ask(
+                    "Запускать CheckWords с правами администратора?\n\n" +
+                    "Да — через Планировщик заданий: программа будет работать и в окнах, запущенных от администратора" +
+                    (elevated ? "." : ". Windows попросит подтверждение.") + "\n\n" +
+                    "Нет — обычный автозапуск без прав администратора.",
+                    MessageBoxButtons.YesNoCancel);
+                if (answer == DialogResult.No)
+                {
+                    Autostart.SetRegistry(true, ExePath);
+                }
+                else if (answer == DialogResult.Yes)
+                {
+                    var exe = ExePath;
+                    if (await RunOnStaThread(() => Autostart.CreateTask(exe, elevated: true, asAdmin: !elevated)))
+                    {
+                        Autostart.SetRegistry(false, exe);
+                        Ask("Готово: задача «CheckWords» создана и сработает при следующем входе в Windows." +
+                            (elevated ? "" : "\n\nСейчас программа по-прежнему работает без прав администратора."),
+                            MessageBoxButtons.OK);
+                    }
+                    else
+                    {
+                        Ask("Не удалось создать задачу: подтверждение администратора отклонено или произошла ошибка.",
+                            MessageBoxButtons.OK);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    static DialogResult Ask(string text, MessageBoxButtons buttons) =>
+        MessageBox.Show(text, "CheckWords", buttons,
+            buttons == MessageBoxButtons.OK ? MessageBoxIcon.Information : MessageBoxIcon.Question);
+
+    /// <summary>
+    /// UAC and schtasks can take many seconds. The UI thread must keep pumping messages meanwhile,
+    /// or Windows drops our keyboard hook on timeout. ShellExecute("runas") wants an STA thread.
+    /// </summary>
+    static Task<T> RunOnStaThread<T>(Func<T> func)
+    {
+        var tcs = new TaskCompletionSource<T>();
+        var thread = new Thread(() =>
+        {
+            try { tcs.SetResult(func()); }
+            catch (Exception ex) { tcs.SetException(ex); }
+        })
+        { IsBackground = true };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return tcs.Task;
+    }
 
     string ProcessName(uint pid)
     {

@@ -95,6 +95,28 @@ Console.WriteLine("\nUnit checks");
     Check(c3?.Text == "hello world" && c3.To == Lang.En, "selection: 'руддщ цщкдв' → 'hello world'", $"{c3}");
 }
 
+// ---------------------------------------------------------------- autostart (opt-in: touches Task Scheduler)
+if (args.Contains("--autostart"))
+{
+    Console.WriteLine("\nAutostart checks");
+    var xmlInfo = Autostart.ParseTaskXml(Autostart.BuildTaskXml(@"C:\Apps\CheckWords.exe", elevated: true, @"PC\user"), enabled: true);
+    Check(xmlInfo == new ScheduledTaskInfo(true, true, @"C:\Apps\CheckWords.exe"), "task XML round trip", $"{xmlInfo}");
+    Check(Autostart.QueryTask("CheckWords.NoSuchTask") is null, "missing task → null");
+
+    var real = Autostart.QueryTask();
+    Console.WriteLine($"  real task 'CheckWords': {(real is null ? "none" : real.ToString())}");
+
+    // A temporary non-elevated task: creating it needs no UAC, and Windows validates our XML.
+    const string testTask = "CheckWords.SelfTest";
+    var exe = Path.Combine(AppContext.BaseDirectory, "CheckWords.Tests.exe");
+    Check(Autostart.CreateTask(exe, elevated: false, asAdmin: false, testTask), "schtasks accepts the generated XML");
+    var created = Autostart.QueryTask(testTask);
+    Check(created is { Enabled: true, Elevated: false } && Autostart.SamePath(created.Command, exe),
+        "created task reads back (enabled, not elevated, same exe)", $"{created}");
+    Check(Autostart.DeleteTask(asAdmin: false, testTask), "test task deleted");
+    Check(Autostart.QueryTask(testTask) is null, "test task is gone");
+}
+
 // ---------------------------------------------------------------- accuracy on held-out text
 var corpora = new Dictionary<Lang, string>
 {

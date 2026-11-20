@@ -1,7 +1,6 @@
 using CheckWords.Core;
 using System.Text.Encodings.Web;
 using System.Text.Json;
-using Microsoft.Win32;
 
 namespace CheckWords;
 
@@ -74,28 +73,6 @@ internal static class UserWords
     {
         Directory.CreateDirectory(AppSettings.Dir);
         File.AppendAllLines(AppSettings.UserWordsPath, [word]);
-    }
-}
-
-internal static class Autostart
-{
-    const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    const string Name = "CheckWords";
-
-    public static bool IsEnabled
-    {
-        get
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-            return key?.GetValue(Name) is string;
-        }
-    }
-
-    public static void Set(bool enabled)
-    {
-        using var key = Registry.CurrentUser.CreateSubKey(RunKey);
-        if (enabled) key.SetValue(Name, $"\"{Environment.ProcessPath}\"");
-        else key.DeleteValue(Name, throwOnMissingValue: false);
     }
 }
 
