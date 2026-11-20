@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CheckWords.Core/CheckWords.Core.csproj" />
+    <Project Path="src/CheckWords/CheckWords.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CheckWords.Tests/CheckWords.Tests.csproj" />
+  </Folder>
+</Solution>

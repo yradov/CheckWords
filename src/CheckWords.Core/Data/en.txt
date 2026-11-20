@@ -1,0 +1,85 @@
+# English: frequent words (dictionary + trigram training). Separated by whitespace, '#' = comment.
+the of and to a in is it you that he was for on are with as i his they be at one have this from or had by not
+word but what some we can out other were all there when up use your how said an each she which do their time if
+will way about many then them write would like so these her long make thing see him two has look more day could go
+come did number sound no most people my over know water than call first who may down side been now find any new
+work part take get place made live where after back little only round man year came show every good me give our
+under name very through just form sentence great think say help low line differ turn cause much mean before move
+right boy old too same tell does set three want air well also play small end put home read hand port large spell
+add even land here must big high such follow act why ask men change went light kind off need house picture try us
+again animal point mother world near build self earth father head stand own page should country found answer school
+grow study still learn plant cover food sun four between state keep eye never last let thought city tree cross farm
+hard start might story saw far sea draw left late run don't while press close night real life few north open seem
+together next white children begin got walk example ease paper group always music those both mark often letter until
+mile river car feet care second book carry took science eat room friend began idea fish mountain stop once base hear
+horse cut sure watch color colour face wood main enough plain girl usual young ready above ever red list though feel
+talk bird soon body dog family direct pose leave song measure door product black short numeral class wind question
+happen complete ship area half rock order fire south problem piece told knew pass since top whole king space heard
+best hour better true during hundred five remember step early hold west ground interest reach fast verb sing listen
+six table travel less morning ten simple several vowel toward war lay against pattern slow center centre love person
+money serve appear road map rain rule govern pull cold notice voice unit power town fine certain fly fall lead cry
+dark machine note wait plan figure star box noun field rest correct able pound done beauty drive stood contain front
+teach week final gave green oh quick develop ocean warm free minute strong special mind behind clear tail produce
+fact street inch multiply nothing course stay wheel full force blue object decide surface deep moon island foot
+system busy test record boat common gold possible plane dry wonder laugh thousand ago ran check game shape hot miss
+brought heat snow tire bring yes distant fill east paint language among
+
+# conversation, everyday
+hello hi hey ok okay thanks thank please sorry yeah yep nope lol btw fyi asap vs etc am being having doing done
+mine ours yours theirs whom today tomorrow yesterday tonight week weekend month morning evening afternoon
+monday tuesday wednesday thursday friday saturday sunday january february march april june july august september
+october november december email emails phone call calls meeting meetings chat message messages team boss client
+customer customers company office remote job jobs salary price cost buy sell pay paid order orders delivery
+really actually probably maybe perhaps definitely basically literally honestly anyway anyways though although
+because however therefore otherwise instead almost already enough quite rather pretty very much more less least
+yes no not never always sometimes usually often again still just only also even ever else soon later early late
+something anything everything nothing someone anyone everyone nobody somebody anybody everybody somewhere anywhere
+everywhere nowhere wanted wants wanting liked likes knows known knowing thinks thinking thanks tried tries trying
+made makes making goes going gone went coming comes got gets getting gave gives giving taken takes taking said says
+saying told tells telling asked asks asking used uses using worked works working looked looks looking seemed seems
+felt feels feeling left leaves leaving kept keeps keeping began begins beginning showed shows showing heard hears
+let lets letting meant means meaning set sets setting put puts putting brought brings bringing happened happens
+wrote writes writing written read reads reading sent send sends sending open opened opens opening close closed
+closes closing start started starts starting stop stopped stops stopping finish finished finishes finishing
+help helped helps helping need needed needs needing call called calls calling move moved moves moving
+change changed changes changing turn turned turns turning live lived lives living believe believed hope hoped
+remember remembered forget forgot forgotten understand understood explain explained agree agreed decide decided
+important different possible available better best worse worst good great nice fine bad wrong right easy hard
+simple new old big small large little long short high low early late young happy sad sure free full empty
+first last next previous main other another same own whole real true false quick slow fast ready busy
+problem problems question questions answer answers reason reasons result results idea ideas point points
+example examples information info detail details issue issues case cases thing things way ways time times
+people person man woman men women child children friend friends family home house room door window car
+world country city street place life day days year years hour hours minute minutes second seconds moment
+
+# software and tech
+git github gitlab commit commits push pull merge rebase branch branches main master dev prod staging release
+releases version versions tag tags fork clone checkout diff patch hotfix bug bugs fix fixes fixed feature features
+issue ticket tickets review reviews reviewer approve approved deploy deployed deployment pipeline build builds
+building built ci cd test tests testing tested unit integration code coding coder developer developers programming
+program programs app apps application applications service services server servers client clients backend frontend
+api apis sdk cli gui ui ux web website site page pages link links url uri http https html css js ts json xml yaml
+yml csv sql nosql db database databases table tables column columns row rows index indexes query queries
+select from where join inner outer left order group by insert update delete create drop alter into values
+npm yarn pnpm node nodejs deno bun react vue angular svelte next nuxt vite webpack babel typescript javascript
+python java kotlin swift rust go golang ruby php perl scala dotnet csharp net nuget maven gradle docker kubernetes
+helm aws azure gcp cloud linux windows macos ubuntu debian bash shell powershell cmd terminal console script
+scripts config configuration settings setting option options env environment variable variables secret secrets
+log logs logging logger debug debugger error errors warning warnings exception exceptions crash crashed stack trace
+null nil undefined true false var let const int long float double decimal string char bool boolean byte void
+object objects array arrays list lists map maps dict dictionary set sets tuple enum struct class classes interface
+interfaces type types typeof instanceof public private protected internal static readonly sealed abstract virtual
+override async await task tasks thread threads lock mutex queue stack heap memory cache caching function functions
+func fn def lambda method methods return returns yield break continue throw try catch finally switch case default
+if else elif for foreach while do loop new this self base super import export module modules package packages
+library libraries framework frameworks namespace using include require extends implements constructor property
+properties field fields value values key keys item items count length size width height name names id ids
+param params parameter parameters argument arguments args input output request requests response responses
+header headers body token tokens auth oauth login logout signin signup password username user users admin root
+file files folder folders directory path paths src lib bin obj dist docs readme license changelog todo fixme
+regex parse parser format formatter print println printf write writer read reader open close save load copy paste
+undo redo refresh reload restart run running stop install uninstall upgrade download upload sync async callback
+callbacks promise promises event events handler handlers listener hook hooks component components props state store
+model models view views controller controllers route routes router middleware endpoint endpoints schema migration
+migrations seed fixture fixtures mock mocks stub spec specs benchmark performance latency timeout retry
+keyboard layout layouts hotkey shortcut screen mouse click window windows tab tabs menu button buttons icon
