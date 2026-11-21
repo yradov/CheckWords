@@ -124,6 +124,7 @@ internal sealed class TrayApp : ApplicationContext
                 UpdateTray();
             }),
             new ToolStripSeparator(),
+            new ToolStripMenuItem("О программе…", InfoIcon(), (_, _) => ShowAbout()),
             new ToolStripMenuItem("Выход", null, (_, _) => ExitThread()),
         });
         _menu.Opening += (_, _) => RefreshMenu();
@@ -431,6 +432,32 @@ internal sealed class TrayApp : ApplicationContext
         {
             _busy = false;
         }
+    }
+
+    AboutForm? _about;
+
+    /// <summary>Shows the About window; a second click brings the open one to the front.</summary>
+    void ShowAbout()
+    {
+        if (_about is { IsDisposed: false })
+        {
+            _about.Activate();
+            return;
+        }
+        _about = new AboutForm(_icons.Normal);
+        _about.FormClosed += (_, _) => { _about.Dispose(); _about = null; };
+        _about.Show();
+        _about.Activate();
+    }
+
+    static Image? InfoIcon()
+    {
+        try
+        {
+            using var icon = SystemIcons.GetStockIcon(StockIconId.Info, StockIconOptions.SmallIcon);
+            return icon.ToBitmap();
+        }
+        catch { return null; } // the item works without an icon
     }
 
     static DialogResult Ask(string text, MessageBoxButtons buttons) =>
