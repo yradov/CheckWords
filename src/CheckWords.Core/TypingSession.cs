@@ -31,7 +31,6 @@ public sealed class TypingSession
     public bool WarnMidWord { get; set; } = true;
     public event Action<Suggestion>? Warning;
     public IReadOnlyList<Entry> Entries => _entries;
-    public Lang PreferredCyrillic => _detector.PreferredCyrillic;
 
     public void Reset()
     {
@@ -122,7 +121,7 @@ public sealed class TypingSession
             _entries[k] = _entries[k] with { Lang = plan.To };
         _warnedStart = plan.Start;
         _lastConversion = (plan.Start, plan.End, _version);
-        if (plan.To.IsCyrillic()) _detector.PreferredCyrillic = plan.To;
+        _detector.Prefer(plan.To);
     }
 
     void CheckWord(bool complete)
@@ -137,9 +136,9 @@ public sealed class TypingSession
             _warnedStart = start;
             Warning?.Invoke(suggestion);
         }
-        else if (complete && lang.IsCyrillic() && end - start + 1 >= 3)
+        else if (complete && end - start + 1 >= 3)
         {
-            _detector.PreferredCyrillic = lang;
+            _detector.Prefer(lang);
         }
     }
 

@@ -1,24 +1,93 @@
 namespace CheckWords.Core;
 
-public enum Lang
+/// <summary>The writing system of a language: languages of the same script share most letters.</summary>
+public enum Script
 {
-    Unknown = 0,
-    En,
-    Ru,
-    Uk,
+    Other = 0,
+    Latin,
+    Cyrillic,
+    Greek,
+}
+
+/// <summary>
+/// A language, identified by its ISO 639-1 code ("en", "bg"). Instances are interned, so one code
+/// always gives the same object and reference equality works. EN, RU and UK ship with built-in word
+/// lists; any other language is picked up from an installed Windows layout plus a user dictionary.
+/// </summary>
+public sealed class Lang : IComparable<Lang>
+{
+    // Declared before the instances below: static fields initialise in this order.
+    static readonly Dictionary<string, Lang> All = new(StringComparer.OrdinalIgnoreCase);
+    static readonly object Gate = new();
+    static readonly string[] BuiltInCodes = { "en", "ru", "uk" };
+
+    public static readonly Lang Unknown = new("", Script.Other, -1);
+    public static readonly Lang En = Get("en", Script.Latin);
+    public static readonly Lang Ru = Get("ru", Script.Cyrillic);
+    public static readonly Lang Uk = Get("uk", Script.Cyrillic);
+
+    readonly int _order;
+
+    Lang(string id, Script script, int order)
+    {
+        Id = id;
+        Script = script;
+        _order = order;
+    }
+
+    /// <summary>Lower-case ISO 639-1 code: "en", "ru", "bg". Empty for <see cref="Unknown"/>.</summary>
+    public string Id { get; }
+
+    /// <summary>The script of the language's letters; set from the layout when it is first seen.</summary>
+    public Script Script { get; private set; }
+
+    /// <summary>True for EN / RU / UK: they have word lists inside the program.</summary>
+    public bool IsBuiltIn => Array.IndexOf(BuiltInCodes, Id) >= 0;
+
+    /// <summary>The interned language for a code; <paramref name="script"/> fills in a script not known yet.</summary>
+    public static Lang Get(string id, Script script = Script.Other)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return Unknown;
+        lock (Gate)
+        {
+            if (All.TryGetValue(id, out var lang))
+            {
+                if (lang.Script == Script.Other && script != Script.Other) lang.Script = script;
+                return lang;
+            }
+            int builtIn = Array.IndexOf(BuiltInCodes, id.ToLowerInvariant());
+            lang = new Lang(id.ToLowerInvariant(), script, builtIn >= 0 ? builtIn : 100);
+            All[id] = lang;
+            return lang;
+        }
+    }
+
+    /// <summary>EN, RU, UK first (in that order), then the other languages alphabetically.</summary>
+    public int CompareTo(Lang? other)
+    {
+        if (other is null) return 1;
+        int c = _order.CompareTo(other._order);
+        return c != 0 ? c : string.CompareOrdinal(Id, other.Id);
+    }
+
+    public override string ToString() => this == Unknown ? "Unknown" : Id;
 }
 
 public static class LangExtensions
 {
-    public static string Code(this Lang lang) => lang switch
-    {
-        Lang.En => "EN",
-        Lang.Ru => "RU",
-        Lang.Uk => "UK",
-        _ => "??",
-    };
+    /// <summary>Upper-case code for the UI: "EN", "BG".</summary>
+    public static string Code(this Lang lang) => lang == Lang.Unknown ? "??" : lang.Id.ToUpperInvariant();
 
-    public static bool IsCyrillic(this Lang lang) => lang is Lang.Ru or Lang.Uk;
+    public static bool IsCyrillic(this Lang lang) => lang.Script == Script.Cyrillic;
+
+    /// <summary>The script a letter belongs to.</summary>
+    public static Script ScriptOf(char c) => c switch
+    {
+        >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= 'À' and <= 'ɏ' => Script.Latin,
+        >= 'Ѐ' and <= 'ӿ' => Script.Cyrillic,
+        >= 'Ͱ' and <= 'Ͽ' => Script.Greek,
+        _ => Script.Other,
+    };
 }
 
 /// <summary>

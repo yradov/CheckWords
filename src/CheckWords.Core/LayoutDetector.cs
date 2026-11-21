@@ -25,7 +25,7 @@ public sealed class DetectorOptions
     public double JunkAltMin { get; set; } = -4.2;
     /// <summary>A dictionary word may score up to this much worse than the current text and still win.</summary>
     public double KnownTolerance { get; set; } = 1.5;
-    /// <summary>RU ↔ UK: required total (not per-char) log-prob advantage.</summary>
+    /// <summary>Two layouts of the same script (RU ↔ UK, RU ↔ BG): required total (not per-char) log-prob advantage.</summary>
     public double CyrSumMargin { get; set; } = 4.0;
 }
 
@@ -37,6 +37,7 @@ public sealed class LayoutDetector
     readonly IKeyMapper _map;
     readonly IReadOnlyDictionary<Lang, LanguageModel> _models;
     readonly List<Lang> _langs;
+    readonly Dictionary<Script, Lang> _preferred = new();
 
     public LayoutDetector(IKeyMapper map, IReadOnlyDictionary<Lang, LanguageModel> models, DetectorOptions? options = null)
     {
@@ -44,27 +45,51 @@ public sealed class LayoutDetector
         _models = models;
         _langs = map.Langs.Where(models.ContainsKey).ToList();
         Options = options ?? new DetectorOptions();
-        PreferredCyrillic = _langs.Contains(Lang.Ru) ? Lang.Ru : Lang.Uk;
     }
 
     public DetectorOptions Options { get; }
     public IReadOnlyList<Lang> Langs => _langs;
 
     /// <summary>
-    /// RU and UK type the same letters on most keys; when a conversion gives the same text in both,
-    /// the layout the user used last for Cyrillic wins.
+    /// Layouts of one script type the same letters on many keys (RU and UK on most of them); when a
+    /// conversion gives the same text in both, the layout the user used last for that script wins.
+    /// By default it is the first one in sort order (RU before UK).
     /// </summary>
-    public Lang PreferredCyrillic { get; set; }
+    public Lang PreferredFor(Script script)
+    {
+        if (script == Script.Other) return Lang.Unknown;
+        if (_preferred.TryGetValue(script, out var lang) && _langs.Contains(lang)) return lang;
+        return _langs.Where(l => l.Script == script).Order().FirstOrDefault() ?? Lang.Unknown;
+    }
 
-    /// <summary>EN first, then the preferred Cyrillic layout, then the other one.</summary>
+    /// <summary>Remembers <paramref name="lang"/> as the preferred layout of its script.</summary>
+    public void Prefer(Lang lang)
+    {
+        if (lang.Script != Script.Other && _langs.Contains(lang)) _preferred[lang.Script] = lang;
+    }
+
+    /// <summary>The remembered preferences, to carry them over to a new detector after a reload.</summary>
+    public IReadOnlyCollection<Lang> Preferences => _preferred.Values;
+
+    /// <summary>
+    /// Grouped by script, scripts in sort order of their first language (EN, then the Cyrillic ones…);
+    /// inside a script the preferred layout comes first.
+    /// </summary>
     public List<Lang> CycleOrder()
     {
         var order = new List<Lang>();
-        if (_langs.Contains(Lang.En)) order.Add(Lang.En);
-        if (_langs.Contains(PreferredCyrillic)) order.Add(PreferredCyrillic);
-        order.AddRange(_langs.Where(l => !order.Contains(l)));
+        foreach (var lang in _langs.Order())
+        {
+            if (order.Contains(lang)) continue;
+            if (lang.Script == Script.Other) { order.Add(lang); continue; }
+            var pref = PreferredFor(lang.Script);
+            order.Add(pref);
+            order.AddRange(_langs.Where(l => l.Script == lang.Script && l != pref).Order());
+        }
         return order;
     }
+
+    static bool SameScript(Lang a, Lang b) => a.Script == b.Script && a.Script != Script.Other;
 
     public string? TextFor(IReadOnlyList<KeyStroke> keys, Lang lang)
     {
@@ -119,7 +144,7 @@ public sealed class LayoutDetector
             if (altKnown)
                 ok = sAlt > sCur - Options.KnownTolerance
                      && (complete || curJunk || span >= Options.MidStatMinLetters);
-            else if (current.IsCyrillic() && alt.IsCyrillic())
+            else if (SameScript(current, alt))
             {
                 // RU and UK differ in a few letters only, so compare the total, not the per-char average.
                 int n = altNorm.Length + (complete ? 1 : 0);
@@ -134,7 +159,7 @@ public sealed class LayoutDetector
                      && sCur <= Options.StatCurMax && sAlt >= altMin;
             if (!ok) continue;
 
-            double rank = sAlt + (altKnown ? 5 : 0) + (alt == PreferredCyrillic ? 0.25 : 0);
+            double rank = sAlt + (altKnown ? 5 : 0) + (alt == PreferredFor(alt.Script) ? 0.25 : 0);
             if (rank > bestRank)
             {
                 bestRank = rank;
@@ -195,12 +220,12 @@ public sealed class LayoutDetector
         return len == 0 ? LanguageModel.Junk / 2 : sum / len;
     }
 
-    /// <summary>If the preferred Cyrillic layout gives exactly the same text, switch to it instead.</summary>
-    Lang Preferred(IReadOnlyList<KeyStroke> keys, Lang alt, string altText, Lang current) =>
-        alt.IsCyrillic() && alt != PreferredCyrillic && PreferredCyrillic != current
-        && _langs.Contains(PreferredCyrillic) && TextFor(keys, PreferredCyrillic) == altText
-            ? PreferredCyrillic
-            : alt;
+    /// <summary>If the preferred layout of the same script gives exactly the same text, switch to it instead.</summary>
+    Lang Preferred(IReadOnlyList<KeyStroke> keys, Lang alt, string altText, Lang current)
+    {
+        var pref = PreferredFor(alt.Script);
+        return pref != Lang.Unknown && alt != pref && pref != current && TextFor(keys, pref) == altText ? pref : alt;
+    }
 
     double Rank(string text, Lang lang, bool complete)
     {

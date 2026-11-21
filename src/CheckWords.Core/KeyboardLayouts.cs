@@ -1,3 +1,6 @@
+using System.Globalization;
+using Microsoft.Win32;
+
 namespace CheckWords.Core;
 
 /// <summary>Turns physical key strokes into text for a given language layout and back.</summary>
@@ -14,9 +17,10 @@ public sealed record LayoutInfo(IntPtr Hkl, Lang Lang)
 }
 
 /// <summary>
-/// The installed Windows layouts that we know how to work with (EN / RU / UK).
-/// A layout is recognised by what it types on the S key, not by its locale id:
-/// e.g. "Russian" can be installed under the ru-UA locale (0x2000), which has no primary language.
+/// The installed Windows layouts, one per language. A layout's language is the language of the
+/// keyboard itself (its KLID, e.g. 00000402 = Bulgarian), not of the input locale it is installed
+/// under: "Russian" can be installed under the ru-UA locale (0x2000), which has no primary language.
+/// When the keyboard id can't be resolved, EN / RU / UK are still recognised by what the S key types.
 /// </summary>
 public sealed class KeyboardLayouts : IKeyMapper
 {
@@ -53,6 +57,9 @@ public sealed class KeyboardLayouts : IKeyMapper
 
     public static Lang Classify(IntPtr hkl)
     {
+        var code = KeyboardLanguage(hkl);
+        if (code is not null) return Lang.Get(code, LayoutScript(hkl));
+
         var s = MapRaw(new KeyStroke(Vk.S, 0, false, false), hkl);
         var q = MapRaw(new KeyStroke(Vk.Q, 0, false, false), hkl);
         var z = MapRaw(new KeyStroke(Vk.Z, 0, false, false), hkl);
@@ -63,6 +70,85 @@ public sealed class KeyboardLayouts : IKeyMapper
             "і" => Lang.Uk,
             _ => Lang.Unknown,
         };
+    }
+
+    const string LayoutsKey = @"SYSTEM\CurrentControlSet\Control\Keyboard Layouts";
+
+    /// <summary>
+    /// ISO 639-1 code of the keyboard's language, from the HKL's high word (the keyboard id).
+    /// 0xFxxx means a layout variant (e.g. Ukrainian Enhanced, 00020422), looked up by its "Layout Id"
+    /// in the registry; 0xExxx is an IME (Chinese, Japanese…), which we don't handle.
+    /// </summary>
+    public static string? KeyboardLanguage(IntPtr hkl)
+    {
+        long v = hkl.ToInt64();
+        int device = (int)((v >> 16) & 0xFFFF);
+        int langId;
+        switch (device & 0xF000)
+        {
+            case 0xE000:
+                return null;
+            case 0xF000:
+                var klid = KlidForLayoutId(device & 0x0FFF);
+                if (klid is null) return null;
+                langId = (int)(Convert.ToUInt32(klid, 16) & 0xFFFF);
+                break;
+            default:
+                langId = device != 0 ? device : (int)(v & 0xFFFF);
+                break;
+        }
+        try
+        {
+            var name = CultureInfo.GetCultureInfo(langId).TwoLetterISOLanguageName;
+            return name.Length is 2 or 3 && name != "iv" ? name : null; // "iv" = invariant culture
+        }
+        catch (CultureNotFoundException) { return null; }
+        catch (ArgumentException) { return null; }
+    }
+
+    static string? KlidForLayoutId(int layoutId)
+    {
+        try
+        {
+            using var root = Registry.LocalMachine.OpenSubKey(LayoutsKey);
+            if (root is null) return null;
+            foreach (var name in root.GetSubKeyNames())
+            {
+                using var key = root.OpenSubKey(name);
+                if (key?.GetValue("Layout Id") is string id
+                    && int.TryParse(id, NumberStyles.HexNumber, null, out var n) && n == layoutId)
+                    return name;
+            }
+        }
+        catch (Exception e) when (e is System.Security.SecurityException or UnauthorizedAccessException or IOException) { }
+        return null;
+    }
+
+    /// <summary>The script most letter keys (A–Z positions) type in this layout.</summary>
+    public static Script LayoutScript(IntPtr hkl)
+    {
+        var counts = new Dictionary<Script, int>();
+        for (int vk = 0x41; vk <= 0x5A; vk++)
+        {
+            var s = MapRaw(new KeyStroke(vk, 0, false, false), hkl);
+            if (s is not { Length: > 0 } || !char.IsLetter(s[0])) continue;
+            var script = LangExtensions.ScriptOf(s[0]);
+            counts[script] = counts.GetValueOrDefault(script) + 1;
+        }
+        return counts.Count == 0 ? Script.Other : counts.MaxBy(kv => kv.Value).Key;
+    }
+
+    /// <summary>Every letter the layout can type (with Shift, and with AltGr: ґ on the Ukrainian layout).</summary>
+    public IReadOnlySet<char> Letters(Lang lang)
+    {
+        var set = new HashSet<char>();
+        if (Get(lang) is not { } info) return set;
+        for (int vk = 0x20; vk <= 0xFE; vk++)
+            foreach (var (shift, altGr) in new[] { (false, false), (true, false), (false, true), (true, true) })
+                if (MapRaw(new KeyStroke(vk, 0, shift, false, altGr), info.Hkl) is { } s)
+                    foreach (var c in s)
+                        if (char.IsLetter(c)) set.Add(char.ToLowerInvariant(c));
+        return set;
     }
 
     public LayoutInfo? Get(Lang lang) => _layouts.FirstOrDefault(l => l.Lang == lang);

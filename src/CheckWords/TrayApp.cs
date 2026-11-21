@@ -22,6 +22,7 @@ internal sealed class TrayApp : ApplicationContext
     LayoutDetector _detector = null!;
     TypingSession _session = null!;
     TextConverter _converter = null!;
+    Dictionary<Lang, LanguageModel> _models = new();
     Beeper? _beeper;
     Hotkey? _wordHotkey;
     Hotkey? _selectionHotkey;
@@ -35,7 +36,7 @@ internal sealed class TrayApp : ApplicationContext
     Suggestion? _lastWarning;
 
     ToolStripMenuItem _miInfo = null!, _miEnabled = null!, _miSound = null!, _miMidWord = null!,
-        _miIgnoreWord = null!, _miExclude = null!, _miAutostart = null!;
+        _miIgnoreWord = null!, _miExclude = null!, _miAutostart = null!, _miLanguages = null!;
 
     public TrayApp()
     {
@@ -57,9 +58,10 @@ internal sealed class TrayApp : ApplicationContext
         _hooks.Install();
         UpdateTray();
 
-        if (_layouts.Langs.Count < 2)
+        if (_detector.Langs.Count < 2)
             _tray.ShowBalloonTip(5000, "CheckWords",
-                "Нужно минимум две раскладки из EN / RU / UK. Найдено: " + string.Join(", ", _layouts.Layouts),
+                "Нужно минимум две раскладки, для которых есть словарь. Сейчас: " + LanguagesSummary()
+                + ". Трей → «Языки» → «Добавить язык…».",
                 ToolTipIcon.Warning);
     }
 
@@ -68,10 +70,10 @@ internal sealed class TrayApp : ApplicationContext
     void LoadEngine()
     {
         _layouts = KeyboardLayouts.Detect();
-        var models = LanguageData.Build(_layouts.Langs, UserWords.Load(), AppSettings.DictionaryDir);
-        var preferred = _detector?.PreferredCyrillic;
-        _detector = new LayoutDetector(_layouts, models);
-        if (preferred is { } p && _detector.Langs.Contains(p)) _detector.PreferredCyrillic = p;
+        _models = LanguageData.Build(_layouts.Langs, UserWords.Load(), AppSettings.DictionaryDir, _layouts.Letters);
+        var preferred = _detector?.Preferences.ToList() ?? new List<Lang>();
+        _detector = new LayoutDetector(_layouts, _models);
+        foreach (var p in preferred) _detector.Prefer(p);
         _session = new TypingSession(_layouts, _detector) { WarnMidWord = _settings.WarnMidWord };
         _session.Warning += OnWarning;
         _converter = new TextConverter(_layouts, _detector);
@@ -101,6 +103,7 @@ internal sealed class TrayApp : ApplicationContext
         _miIgnoreWord = new ToolStripMenuItem("", null, (_, _) => IgnoreLastWarning());
         _miExclude = new ToolStripMenuItem("", null, (_, _) => ToggleExcludeLastProcess());
         _miAutostart = new ToolStripMenuItem("Запускать при входе в Windows", null, (_, _) => ToggleAutostart());
+        _miLanguages = new ToolStripMenuItem("Языки");
         _menu.ShowItemToolTips = true;
 
         _menu.Items.AddRange(new ToolStripItem[]
@@ -111,6 +114,7 @@ internal sealed class TrayApp : ApplicationContext
             new ToolStripSeparator(),
             _miIgnoreWord, _miExclude,
             new ToolStripSeparator(),
+            _miLanguages,
             _miAutostart,
             new ToolStripMenuItem("Открыть папку настроек", null, (_, _) =>
             {
@@ -137,6 +141,7 @@ internal sealed class TrayApp : ApplicationContext
         _miSound.Checked = _settings.Sound;
         _miMidWord.Checked = _settings.WarnMidWord;
         RefreshAutostartItem();
+        RefreshLanguagesItem();
 
         _miIgnoreWord.Visible = _lastWarning is not null;
         if (_lastWarning is not null)
@@ -332,13 +337,72 @@ internal sealed class TrayApp : ApplicationContext
     void UpdateTray()
     {
         _tray.Icon = _settings.Enabled ? _icons.Normal : _icons.Disabled;
-        var langs = string.Join("/", _layouts.Langs.Select(l => l.Code()));
+        var langs = string.Join("/", _detector.Langs.Select(l => l.Code()));
         SetTooltip(_settings.Enabled
             ? $"CheckWords — слежу за раскладкой ({langs}). {_wordHotkey} — исправить слово"
             : "CheckWords — выключен (двойной клик — включить)");
     }
 
     void SetTooltip(string text) => _tray.Text = text.Length <= 127 ? text : text[..124] + "...";
+
+    // ------------------------------------------------------------------ languages
+
+    /// <summary>"EN, RU, UK; без словаря: BG".</summary>
+    string LanguagesSummary()
+    {
+        var active = _layouts.Langs.Where(_models.ContainsKey).Select(l => l.Code()).ToList();
+        var missing = _layouts.Langs.Where(l => !_models.ContainsKey(l)).Select(l => l.Code()).ToList();
+        var text = active.Count > 0 ? string.Join(", ", active) : "нет";
+        return missing.Count > 0 ? $"{text}; без словаря: {string.Join(", ", missing)}" : text;
+    }
+
+    void RefreshLanguagesItem()
+    {
+        _miLanguages.Text = "Языки: " + LanguagesSummary();
+        var items = _miLanguages.DropDownItems;
+        items.Clear();
+        foreach (var lang in _layouts.Langs)
+        {
+            string text;
+            if (_models.TryGetValue(lang, out var model))
+            {
+                var sources = new List<string>();
+                if (lang.IsBuiltIn) sources.Add("встроенный словарь");
+                sources.AddRange(LanguageData.DictionaryFiles(AppSettings.DictionaryDir, lang).Select(f => Path.GetFileName(f)));
+                text = $"{lang.Code()}: {model.WordCount:N0} слов ({string.Join(" + ", sources)})";
+            }
+            else text = $"{lang.Code()}: нет словаря, раскладка не проверяется";
+            items.Add(new ToolStripMenuItem(text) { Enabled = false });
+        }
+        items.Add(new ToolStripSeparator());
+        items.Add(new ToolStripMenuItem("Добавить язык…", null, (_, _) => ShowAddLanguageHelp()));
+        items.Add(new ToolStripMenuItem("Открыть папку словарей", null, (_, _) => OpenDictionaryFolder()));
+    }
+
+    static void OpenDictionaryFolder()
+    {
+        Directory.CreateDirectory(AppSettings.DictionaryDir);
+        Process.Start("explorer.exe", AppSettings.DictionaryDir);
+    }
+
+    void ShowAddLanguageHelp()
+    {
+        var answer = Ask(
+            "Чтобы CheckWords проверял ещё один язык:\n\n" +
+            "1. Добавьте его раскладку клавиатуры в Windows: Параметры → Время и язык → Язык и регион.\n\n" +
+            "2. Положите словарь в папку dict. Имя файла начинается с кода языка (bg, de, pl…):\n" +
+            "   • bg.txt — текст в UTF-8, слова через пробел или по одному в строке;\n" +
+            "   • bg_BG.dic вместе с bg_BG.aff — словарь Hunspell (например, из словарей LibreOffice).\n" +
+            "   Чем больше слов, тем точнее проверка.\n\n" +
+            "3. Нажмите «Перечитать настройки и словари» в меню.\n\n" +
+            $"Сейчас: {LanguagesSummary()}.\n\n" +
+            "Открыть параметры языка Windows и папку словарей?",
+            MessageBoxButtons.YesNo);
+        if (answer != DialogResult.Yes) return;
+        try { Process.Start(new ProcessStartInfo("ms-settings:regionlanguage") { UseShellExecute = true }); }
+        catch (Exception) { } // older Windows: the dictionary folder alone is still useful
+        OpenDictionaryFolder();
+    }
 
     // ------------------------------------------------------------------ autostart
 
