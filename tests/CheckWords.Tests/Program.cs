@@ -63,10 +63,10 @@ Console.WriteLine("\nUnit checks");
     foreach (var k in Type("ghbdtn ", Lang.En)) session.OnKey(k, Lang.En);
     Check(warned?.To == Lang.Ru, "session warns on 'ghbdtn '", $"{warned}");
     var plan = session.PlanWordConversion();
-    Check(plan is { To: Lang.Ru, Insert: "привет ", DeleteCount: 7 }, "plan: delete 7, insert 'привет '", $"{plan}");
+    Check(plan is { Insert: "привет ", DeleteCount: 7 } && plan.To == Lang.Ru, "plan: delete 7, insert 'привет '", $"{plan}");
     session.Apply(plan!);
     var plan2 = session.PlanWordConversion();
-    Check(plan2 is { To: Lang.En, Insert: "ghbdtn " }, "second press cycles back to EN", $"{plan2}");
+    Check(plan2 is { Insert: "ghbdtn " } && plan2.To == Lang.En, "second press cycles back to EN", $"{plan2}");
 
     // Session: shift is kept → "Ghbdtn" → "Привет"
     session.Reset();
@@ -93,6 +93,71 @@ Console.WriteLine("\nUnit checks");
     Check(c2?.Text == "Привіт, як справи?" && c2.To == Lang.Uk, "selection: → 'Привіт, як справи?'", $"{c2}");
     var c3 = conv.Convert("руддщ цщкдв");
     Check(c3?.Text == "hello world" && c3.To == Lang.En, "selection: 'руддщ цщкдв' → 'hello world'", $"{c3}");
+}
+
+// ---------------------------------------------------------------- languages beyond EN / RU / UK
+Console.WriteLine("\nLanguage checks");
+{
+    // Every installed layout is recognised by its keyboard id (incl. variants such as Ukrainian Enhanced).
+    foreach (var layout in layouts.Layouts)
+    {
+        var code = KeyboardLayouts.KeyboardLanguage(layout.Hkl);
+        var script = KeyboardLayouts.LayoutScript(layout.Hkl);
+        Check(code == layout.Lang.Id && script == layout.Lang.Script,
+            $"{layout}: keyboard language '{code}', script {script}", $"expected {layout.Lang.Id}/{layout.Lang.Script}");
+    }
+
+    Check(Lang.Get("BG") == Lang.Get("bg") && Lang.Get("bg").Code() == "BG", "languages are interned by code");
+    Check(new[] { Lang.Get("bg"), Lang.Uk, Lang.En, Lang.Ru }.Order().SequenceEqual(new[] { Lang.En, Lang.Ru, Lang.Uk, Lang.Get("bg") }),
+        "sort order: EN, RU, UK, then the rest");
+
+    // Hunspell .dic lines: a count on the first line, affix flags after a slash.
+    var tokens = LanguageData.Tokenize("3\nкъща/AB\nмлякото\nнай-хубав/X\n").ToList();
+    Check(tokens.SequenceEqual(new[] { "къща", "млякото", "най", "хубав" }), "Hunspell lines are tokenised", string.Join(",", tokens));
+
+    var dir = Path.Combine(Path.GetTempPath(), "CheckWords.Tests." + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    try
+    {
+        var bg = Lang.Get("bg", Script.Cyrillic);
+        File.WriteAllText(Path.Combine(dir, "bg.txt"), "здравей\nкъща\n");
+        File.WriteAllText(Path.Combine(dir, "bgx.txt"), "чужд\n");         // another code: not BG
+        File.WriteAllText(Path.Combine(dir, "bg_BG.aff"), "SET microsoft-cp1251\n");
+        File.WriteAllBytes(Path.Combine(dir, "bg_BG.dic"),
+            System.Text.Encoding.GetEncoding(1251).GetBytes("2\nмляко/A\nхляб\n"));
+
+        var files = LanguageData.DictionaryFiles(dir, bg).Select(Path.GetFileName).ToList();
+        Check(files.SequenceEqual(new[] { "bg.txt", "bg_BG.dic" }), "dictionary files of BG: bg.txt, bg_BG.dic", string.Join(",", files));
+
+        var bgModels = LanguageData.Build(new[] { Lang.En, bg }, extraDictionaryDir: dir);
+        var bgModel = bgModels.GetValueOrDefault(bg);
+        Check(bgModel is { WordCount: 4 } && bgModel.IsKnown("мляко") && bgModel.IsKnown("къща"),
+            "BG model from the user's files, cp1251 .dic decoded via .aff", $"{bgModel?.WordCount} words");
+        Check(!LanguageData.Build(new[] { Lang.Get("de") }, extraDictionaryDir: dir).Any(),
+            "a language without any word list gets no model");
+    }
+    finally { Directory.Delete(dir, recursive: true); }
+
+    // User words go to the languages whose layout can type them.
+    var withUser = LanguageData.Build(layouts.Langs, new[] { "мы", "він", "кошка", "kubectl" }, null, layouts.Letters);
+    Check(withUser[Lang.Ru].IsKnown("мы") && !withUser[Lang.Uk].IsKnown("мы"), "user word 'мы' → RU only");
+    Check(withUser[Lang.Uk].IsKnown("він") && !withUser[Lang.Ru].IsKnown("він"), "user word 'він' → UK only");
+    Check(withUser[Lang.Ru].IsKnown("кошка") && withUser[Lang.Uk].IsKnown("кошка"), "user word 'кошка' → RU and UK");
+    Check(withUser[Lang.En].IsKnown("kubectl") && !withUser[Lang.Ru].IsKnown("kubectl"), "user word 'kubectl' → EN only");
+
+    // A layout without a dictionary is ignored by the detector; the others keep working.
+    var noUk = LanguageData.Build(layouts.Langs).Where(kv => kv.Key != Lang.Uk).ToDictionary();
+    var partial = new LayoutDetector(layouts, noUk);
+    Check(!partial.Langs.Contains(Lang.Uk), "layout without dictionary is not used");
+    Check(partial.Analyze(Type("привет", Lang.Ru), Lang.Uk, true) is null, "typing in it gives no warnings");
+    Check(partial.Analyze(Type("привет", Lang.Ru), Lang.En, true)?.To == Lang.Ru, "EN → RU still works");
+
+    // The preferred layout of a script follows what the user types.
+    var pref = new LayoutDetector(layouts, models);
+    Check(pref.PreferredFor(Script.Cyrillic) == Lang.Ru && pref.CycleOrder().SequenceEqual(new[] { Lang.En, Lang.Ru, Lang.Uk }),
+        "default preference: RU; cycle EN, RU, UK");
+    pref.Prefer(Lang.Uk);
+    Check(pref.CycleOrder().SequenceEqual(new[] { Lang.En, Lang.Uk, Lang.Ru }), "after UK is used: cycle EN, UK, RU");
 }
 
 // ---------------------------------------------------------------- autostart (opt-in: touches Task Scheduler)

@@ -30,6 +30,8 @@ public sealed class LanguageModel
 
     public Lang Lang { get; }
     public int WordCount => _words.Count;
+    /// <summary>Letters seen in the training words.</summary>
+    public IReadOnlySet<char> Alphabet => _alphabet;
 
     public static string Normalize(string s)
     {
