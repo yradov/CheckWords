@@ -26,6 +26,9 @@ so capturing it takes no characters away. Details that are handled:
 The app's interface (tray menu, dialogs) is in Russian. Menu items below are given in English
 with the original label in parentheses.
 
+The tray menu item "About…" («О программе…») shows the version, a link to this repository and
+"Report a problem" («Сообщить о проблеме»), which opens [GitHub Issues](https://github.com/yradov/CheckWords/issues).
+
 ## Running
 
 ```bash
